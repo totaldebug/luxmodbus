@@ -8,3 +8,10 @@ decodes each and asserts it re-encodes to the identical bytes — the second
 See [`docs/capturing-packets.md`](../../docs/capturing-packets.md) for the full
 walkthrough — capturing with `tcpdump`/`tshark` and a splitter that cuts the TCP
 stream into individual `.bin` frames.
+
+**Privacy:** the committed fixtures are sanitised — the dongle serial (outer
+envelope) and inverter serial (inner data frame) are replaced with placeholders
+(`BA10000001` / `3010000001`) and the CRC recomputed, so they still round-trip
+without exposing real hardware identifiers. The frame structure, register
+addresses and live values are otherwise unchanged. Sanitise any new capture the
+same way before committing.
