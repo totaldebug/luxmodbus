@@ -18,9 +18,10 @@ The inner data frame::
 
     action(1) | device_function(1) | inverter_serial(10) | register(u16) | value
 
-``value`` is preceded by a one-byte length when ``protocol`` is 2 or 5 and the
-device function is not WRITE_SINGLE (this is the shape of read responses);
-otherwise it is two raw bytes.
+For a read response (``protocol`` 2 or 5) ``value`` is preceded by a one-byte
+length. A single write carries two raw value bytes; a multiple write (function
+0x10) carries a 16-bit register count and a one-byte byte-count before the value
+words.
 """
 
 from __future__ import annotations
@@ -57,6 +58,9 @@ SERIAL_LEN = 10
 # + dongle_serial(10) + data_length(2)
 HEADER_LEN = 20
 _DEVICE_ERROR_FLAG = 0x80
+# A multi-write's byte-count is a single byte (2 * register count), so at most
+# 127 registers (254 bytes) can be written in one frame.
+_MAX_MULTI_WRITE = 127
 
 
 class TcpFunction(IntEnum):
@@ -129,11 +133,16 @@ def _u16(buf: bytes, offset: int) -> int:
 
 
 def _has_length_byte(protocol: int, device_function: int) -> bool:
-    """Whether the value field is preceded by a length byte on the wire.
+    """Whether the value field is preceded by a single length byte on the wire.
 
-    True for read responses (protocol 2/5, any function except a single write).
+    True for read responses (protocol 2/5). Writes carry no such byte: a single
+    write has two raw value bytes and a multiple write has its own register-count
+    and byte-count fields (handled in :meth:`DataFrame.decode`).
     """
-    return protocol in (2, 5) and device_function != DeviceFunction.WRITE_SINGLE
+    return protocol in (2, 5) and device_function not in (
+        DeviceFunction.WRITE_SINGLE,
+        DeviceFunction.WRITE_MULTI,
+    )
 
 
 @dataclass(frozen=True)
@@ -195,13 +204,23 @@ class DataFrame:
 
     @classmethod
     def write_multi(cls, inverter_serial: bytes, register: int, values: Sequence[int], *, action: int = 0) -> DataFrame:
-        """Build a request to write consecutive 16-bit ``values`` from ``register``.
+        """Build a request to write consecutive 16-bit ``values`` starting at ``register``.
 
-        Mirrors the framing model used for reads: the words are length-prefixed
-        (one byte = ``2 * len(values)``), low word first.
+        Encodes the spec's multiple-write frame (function 0x10): the start
+        register is followed by a 16-bit register count, a one-byte byte-count
+        (``2 * len(values)``), then the words low-word first. ``value`` holds just
+        the register words; the count and byte-count are derived on :meth:`encode`.
+
+        The layout follows the spec (Table 6) but is **not hardware-verified**:
+        LuxPower dongles are driven entirely by single writes in practice (the
+        official app and known implementations never emit 0x10). Prefer
+        :meth:`write_single` — loop it for consecutive registers — unless you have
+        confirmed 0x10 against your hardware.
         """
         if not values:
             raise ValueError("write_multi requires at least one value")
+        if len(values) > _MAX_MULTI_WRITE:
+            raise ValueError(f"write_multi supports at most {_MAX_MULTI_WRITE} registers, got {len(values)}")
         payload = b"".join(struct.pack("<H", v & 0xFFFF) for v in values)
         return cls(
             action=action,
@@ -209,7 +228,6 @@ class DataFrame:
             inverter_serial=inverter_serial,
             register=register,
             value=payload,
-            has_length_byte=True,
         )
 
     @classmethod
@@ -221,6 +239,21 @@ class DataFrame:
         device_function = data[1]
         inverter_serial = data[2:12]
         register = _u16(data, 12)
+        if device_function == DeviceFunction.WRITE_MULTI:
+            # register | count(u16) | byte_count(u8) | value words
+            if len(data) < 17:
+                raise TruncatedFrameError(f"multi-write frame too short: {len(data)} bytes")
+            byte_count = data[16]
+            value = data[17 : 17 + byte_count]
+            if len(value) != byte_count:
+                raise TruncatedFrameError(f"multi-write byte count says {byte_count}, only {len(value)} present")
+            return cls(
+                action=action,
+                device_function=device_function,
+                inverter_serial=inverter_serial,
+                register=register,
+                value=value,
+            )
         has_length = _has_length_byte(protocol, device_function)
         if has_length:
             length = data[14]
@@ -245,6 +278,9 @@ class DataFrame:
             + self.inverter_serial
             + struct.pack("<H", self.register)
         )
+        if self.device_function == DeviceFunction.WRITE_MULTI:
+            # register | count(u16) | byte_count(u8) | value words
+            return head + struct.pack("<HB", len(self.value) // 2, len(self.value)) + self.value
         if self.has_length_byte:
             return head + struct.pack("<B", len(self.value)) + self.value
         return head + self.value

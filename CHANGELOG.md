@@ -6,7 +6,11 @@
 
 - Request builders on `DataFrame`: `read_input`, `read_hold`, `write_single`,
   and `write_multi` construct read/write data frames (the inner frame is wrapped
-  in a `Frame` envelope by the caller).
+  in a `Frame` envelope by the caller). `read_*` and `write_single` framing is
+  confirmed against the spec and the reference implementation that drives real
+  dongles; `write_multi` (function 0x10) follows the spec's Table 6 layout
+  (`register | count | byte-count | words`) but is **not hardware-verified** —
+  real dongles are driven by single writes, so prefer `write_single`.
 - `decode_read_response` turns a decoded read (or single-write echo) response
   into the `{address: word}` map consumed by `decode_inputs` /
   `DiscoveryStore.observe_many`. `scripts/analyze_capture.py` now uses it instead

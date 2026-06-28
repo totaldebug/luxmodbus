@@ -179,17 +179,25 @@ def test_write_single_packs_value_little_endian():
     assert _wrap(df).value == struct.pack("<H", 0x00FF)
 
 
-def test_write_multi_length_prefixes_consecutive_words():
+def test_write_multi_uses_spec_layout():
     df = DataFrame.write_multi(INVERTER, 68, [0x0102, 0x0304])
     assert df.device_function == DeviceFunction.WRITE_MULTI
-    assert df.has_length_byte is True
-    assert df.value == struct.pack("<HH", 0x0102, 0x0304)
-    assert _wrap(df) == df  # length byte round-trips through decode
+    assert df.value == struct.pack("<HH", 0x0102, 0x0304)  # value holds just the words
+    # register | count(u16) | byte_count(u8) | words
+    expected = b"\x00\x10" + INVERTER + struct.pack("<HHB", 68, 2, 4) + struct.pack("<HH", 0x0102, 0x0304)
+    assert df.encode() == expected
+    assert _wrap(df) == df  # count + byte-count round-trip through decode
+    assert decode_read_response(df) == {68: 0x0102, 69: 0x0304}
 
 
 def test_write_multi_rejects_empty():
     with pytest.raises(ValueError, match="at least one"):
         DataFrame.write_multi(INVERTER, 68, [])
+
+
+def test_write_multi_rejects_too_many_registers():
+    with pytest.raises(ValueError, match="at most 127"):
+        DataFrame.write_multi(INVERTER, 0, [0] * 128)
 
 
 # --- Read-response decoding --------------------------------------------------
