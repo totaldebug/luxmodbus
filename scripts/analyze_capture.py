@@ -41,6 +41,7 @@ from luxmodbus import (
     SelectRegister,
     TimeRegister,
     decode_flags,
+    decode_read_response,
     decode_select,
     decode_time,
     decode_value,
@@ -122,19 +123,15 @@ def collect(frames: list[bytes]) -> tuple[dict[RegisterBank, dict[int, int]], li
         if len(data) < 16:
             continue
         function = data[1]
-        register = int.from_bytes(data[12:14], "little")
         if function in _READ:
             if len(data) <= 16:
                 continue  # a read request carries only a count, no values
-            length = data[14]
-            values = data[15 : 15 + length]
             bank = _BANK_FOR[DeviceFunction(function)]
-            for index in range(length // 2):
-                raw[bank][register + index] = int.from_bytes(values[index * 2 : index * 2 + 2], "little")
+            raw[bank].update(decode_read_response(frame.data_frame()))
         elif function == DeviceFunction.WRITE_SINGLE:
-            value = int.from_bytes(data[14:16], "little")
-            raw[RegisterBank.HOLD][register] = value
-            writes.append((register, value))
+            decoded = decode_read_response(frame.data_frame())
+            raw[RegisterBank.HOLD].update(decoded)
+            writes.extend(decoded.items())
     return raw, writes, bad
 
 

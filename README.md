@@ -54,9 +54,10 @@ entirely offline against captured packet bytes.
 Early. Implemented so far:
 
 - `protocol.py` — frame encode/decode (LuxPower TCP envelope + inner Modbus RTU
-  data frame). No I/O, no register-meaning knowledge.
+  data frame), read/write request builders, and read-response unpacking. No I/O,
+  no register-meaning knowledge.
 - `registers.py` — declarative address → meaning map (the single source of
-  truth) with a decode engine.
+  truth) with a decode engine and a bounds-checked `encode_value` for writes.
 - `discovery.py` — passive diff-and-log engine: compares observed registers
   against the known map and records the unknown with a rolling value history.
 

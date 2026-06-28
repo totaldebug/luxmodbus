@@ -50,6 +50,7 @@ __all__ = [
     "decode_time",
     "decode_value",
     "encode_time",
+    "encode_value",
     "find_hold",
     "find_input",
     "mapped_hold_addresses",
@@ -265,6 +266,37 @@ def decode_value(defn: RegisterDef, raw: Mapping[int, int]) -> float | int | str
     if defn.scale == 1.0:
         return base
     return round(base * defn.scale, 3)
+
+
+def encode_value(defn: RegisterDef, value: float) -> int:
+    """Encode a scaled value into a raw register word for writing.
+
+    The inverse of :func:`decode_value` for plain numeric registers: it enforces
+    the declared ``value_min`` / ``value_max`` bounds (in scaled units) and then
+    divides out ``scale`` to recover the raw word. The result is a 0–65535 word
+    (two's-complement for signed types) ready to hand to
+    :meth:`luxmodbus.protocol.DataFrame.write_single`.
+
+    Raises ``ValueError`` for register kinds with no plain numeric round-trip
+    (ASCII, byte-select, ``transform``), for 32-bit registers, or for a value
+    outside the declared range.
+    """
+    if defn.type is ValueType.ASCII or defn.byte is not None or defn.transform is not None:
+        raise ValueError(f"{defn.key!r} has no plain numeric encoding")
+    if defn.type.words != 1:
+        raise ValueError(f"{defn.key!r} is a 32-bit register; multi-word writes are not supported")
+    if defn.value_min is not None and value < defn.value_min:
+        raise ValueError(f"{value} below minimum {defn.value_min} for {defn.key!r}")
+    if defn.value_max is not None and value > defn.value_max:
+        raise ValueError(f"{value} above maximum {defn.value_max} for {defn.key!r}")
+    raw = round(value / defn.scale)
+    if defn.type.signed:
+        if not -0x8000 <= raw <= 0x7FFF:
+            raise ValueError(f"encoded value {raw} out of s16 range for {defn.key!r}")
+        return raw & 0xFFFF
+    if not 0 <= raw <= 0xFFFF:
+        raise ValueError(f"encoded value {raw} out of u16 range for {defn.key!r}")
+    return raw
 
 
 def decode_inputs(raw: Mapping[int, int]) -> dict[str, float | int | str]:

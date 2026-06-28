@@ -24,6 +24,7 @@ from luxmodbus.protocol import (
     TcpFunction,
     TruncatedFrameError,
     crc16,
+    decode_read_response,
 )
 
 DONGLE = b"BA12345678"
@@ -134,6 +135,81 @@ def test_data_frame_read_response_has_length_byte():
     decoded = DataFrame.decode(encoded, protocol=2)
     assert decoded == df
     assert decoded.value == values
+
+
+# --- Request builders --------------------------------------------------------
+
+
+def _wrap(df: DataFrame) -> DataFrame:
+    """Round-trip a built request through the envelope and back to a data frame."""
+    frame = Frame(tcp_function=TcpFunction.TRANSLATED_DATA, dongle_serial=DONGLE, data=df.encode(), protocol=2)
+    return Frame.decode(frame.encode()).data_frame()
+
+
+@pytest.mark.parametrize(
+    ("builder", "function"),
+    [
+        (DataFrame.read_input, DeviceFunction.READ_INPUT),
+        (DataFrame.read_hold, DeviceFunction.READ_HOLD),
+    ],
+)
+def test_read_request_carries_count_not_values(builder, function):
+    df = builder(INVERTER, 40, 12)
+    assert df.device_function == function
+    assert df.register == 40
+    assert df.has_length_byte is False
+    assert df.value == struct.pack("<H", 12)  # the value field is the register count
+    assert len(df.encode()) == 16  # request shape: no value words
+
+
+def test_read_request_count_defaults_to_one():
+    assert DataFrame.read_input(INVERTER, 0).value == struct.pack("<H", 1)
+
+
+def test_read_request_rejects_non_positive_count():
+    with pytest.raises(ValueError, match="count"):
+        DataFrame.read_input(INVERTER, 0, 0)
+
+
+def test_write_single_packs_value_little_endian():
+    df = DataFrame.write_single(INVERTER, 21, 0x00FF)
+    assert df.device_function == DeviceFunction.WRITE_SINGLE
+    assert df.value == struct.pack("<H", 0x00FF)
+    assert df.has_length_byte is False
+    assert _wrap(df).value == struct.pack("<H", 0x00FF)
+
+
+def test_write_multi_length_prefixes_consecutive_words():
+    df = DataFrame.write_multi(INVERTER, 68, [0x0102, 0x0304])
+    assert df.device_function == DeviceFunction.WRITE_MULTI
+    assert df.has_length_byte is True
+    assert df.value == struct.pack("<HH", 0x0102, 0x0304)
+    assert _wrap(df) == df  # length byte round-trips through decode
+
+
+def test_write_multi_rejects_empty():
+    with pytest.raises(ValueError, match="at least one"):
+        DataFrame.write_multi(INVERTER, 68, [])
+
+
+# --- Read-response decoding --------------------------------------------------
+
+
+def test_decode_read_response_splits_consecutive_words():
+    df = DataFrame(
+        action=1,
+        device_function=DeviceFunction.READ_INPUT,
+        inverter_serial=INVERTER,
+        register=40,
+        value=struct.pack("<HHH", 10, 20, 30),
+        has_length_byte=True,
+    )
+    assert decode_read_response(df) == {40: 10, 41: 20, 42: 30}
+
+
+def test_decode_read_response_single_write_echo():
+    df = DataFrame.write_single(INVERTER, 21, 0x00FF)
+    assert decode_read_response(df) == {21: 0x00FF}
 
 
 # --- Error handling ----------------------------------------------------------

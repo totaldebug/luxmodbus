@@ -26,6 +26,7 @@ otherwise it is two raw bytes.
 from __future__ import annotations
 
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -43,6 +44,7 @@ __all__ = [
     "TcpFunction",
     "TruncatedFrameError",
     "crc16",
+    "decode_read_response",
     "extract_frames",
 ]
 
@@ -156,6 +158,61 @@ class DataFrame:
             raise ValueError(f"inverter_serial must be {SERIAL_LEN} bytes, got {len(self.inverter_serial)}")
 
     @classmethod
+    def read_input(cls, inverter_serial: bytes, register: int, count: int = 1, *, action: int = 0) -> DataFrame:
+        """Build a request to read ``count`` input registers from ``register``."""
+        return cls._read(DeviceFunction.READ_INPUT, inverter_serial, register, count, action)
+
+    @classmethod
+    def read_hold(cls, inverter_serial: bytes, register: int, count: int = 1, *, action: int = 0) -> DataFrame:
+        """Build a request to read ``count`` hold registers from ``register``."""
+        return cls._read(DeviceFunction.READ_HOLD, inverter_serial, register, count, action)
+
+    @classmethod
+    def _read(
+        cls, function: DeviceFunction, inverter_serial: bytes, register: int, count: int, action: int
+    ) -> DataFrame:
+        """Build a read request: the value field carries the register count, no length byte."""
+        if count < 1:
+            raise ValueError(f"count must be >= 1, got {count}")
+        return cls(
+            action=action,
+            device_function=function,
+            inverter_serial=inverter_serial,
+            register=register,
+            value=struct.pack("<H", count),
+        )
+
+    @classmethod
+    def write_single(cls, inverter_serial: bytes, register: int, value: int, *, action: int = 0) -> DataFrame:
+        """Build a request to write one 16-bit ``value`` to a single ``register``."""
+        return cls(
+            action=action,
+            device_function=DeviceFunction.WRITE_SINGLE,
+            inverter_serial=inverter_serial,
+            register=register,
+            value=struct.pack("<H", value & 0xFFFF),
+        )
+
+    @classmethod
+    def write_multi(cls, inverter_serial: bytes, register: int, values: Sequence[int], *, action: int = 0) -> DataFrame:
+        """Build a request to write consecutive 16-bit ``values`` from ``register``.
+
+        Mirrors the framing model used for reads: the words are length-prefixed
+        (one byte = ``2 * len(values)``), low word first.
+        """
+        if not values:
+            raise ValueError("write_multi requires at least one value")
+        payload = b"".join(struct.pack("<H", v & 0xFFFF) for v in values)
+        return cls(
+            action=action,
+            device_function=DeviceFunction.WRITE_MULTI,
+            inverter_serial=inverter_serial,
+            register=register,
+            value=payload,
+            has_length_byte=True,
+        )
+
+    @classmethod
     def decode(cls, data: bytes, protocol: int) -> DataFrame:
         """Decode a received data frame. ``protocol`` comes from the envelope."""
         if len(data) < 14:
@@ -191,6 +248,21 @@ class DataFrame:
         if self.has_length_byte:
             return head + struct.pack("<B", len(self.value)) + self.value
         return head + self.value
+
+
+def decode_read_response(frame: DataFrame) -> dict[int, int]:
+    """Split a read response's value bytes into an ``{address: word}`` map.
+
+    The inverse of the on-wire packing: ``frame.value`` holds consecutive
+    little-endian 16-bit words starting at ``frame.register``. Use this to turn a
+    decoded read (or single-write echo) response into the map consumed by
+    :func:`luxmodbus.registers.decode_inputs` /
+    :meth:`luxmodbus.discovery.DiscoveryStore.observe_many`.
+    """
+    return {
+        frame.register + index: int.from_bytes(frame.value[index * 2 : index * 2 + 2], "little")
+        for index in range(len(frame.value) // 2)
+    }
 
 
 # --- Outer envelope ----------------------------------------------------------

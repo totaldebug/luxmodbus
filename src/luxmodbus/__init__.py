@@ -15,6 +15,7 @@ from luxmodbus.protocol import (
     TcpFunction,
     TruncatedFrameError,
     crc16,
+    decode_read_response,
     extract_frames,
 )
 from luxmodbus.registers import (
@@ -39,6 +40,7 @@ from luxmodbus.registers import (
     decode_time,
     decode_value,
     encode_time,
+    encode_value,
     find_hold,
     find_input,
     mapped_hold_addresses,
@@ -93,10 +95,12 @@ __all__ = [
     "decode_flags",
     "decode_holds",
     "decode_inputs",
+    "decode_read_response",
     "decode_select",
     "decode_time",
     "decode_value",
     "encode_time",
+    "encode_value",
     "extract_frames",
     "find_hold",
     "find_input",

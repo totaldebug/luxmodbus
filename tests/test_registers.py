@@ -21,6 +21,7 @@ from luxmodbus.registers import (
     decode_time,
     decode_value,
     encode_time,
+    encode_value,
     find_hold,
     find_input,
     mapped_hold_addresses,
@@ -52,6 +53,48 @@ def test_unit_scale_returns_int():
 
 def test_missing_register_is_none():
     assert decode_value(find_input("pv1_voltage"), {}) is None
+
+
+# --- Encoding (write path) ---------------------------------------------------
+
+
+def test_encode_value_applies_inverse_scale():
+    cv = find_hold("charge_voltage")
+    assert encode_value(cv, 53.0) == 530  # 53.0 V / 0.1
+
+
+def test_encode_value_unit_scale_is_identity():
+    rate = find_hold("system_charge_rate")
+    assert encode_value(rate, 75) == 75
+
+
+def test_encode_value_round_trips_decode():
+    cv = find_hold("charge_voltage")
+    assert decode_value(cv, {cv.address: encode_value(cv, 53.0)}) == 53.0
+
+
+def test_encode_value_signed_round_trips():
+    # battery_current is s16 @ 0.01 A; -1.0 A -> -100 -> two's-complement word.
+    current = find_input("battery_current")
+    word = encode_value(current, -1.0)
+    assert decode_value(current, {current.address: word}) == -1.0
+
+
+@pytest.mark.parametrize("value", [49.0, 60.0])
+def test_encode_value_rejects_out_of_range(value):
+    with pytest.raises(ValueError, match="charge_voltage"):
+        encode_value(find_hold("charge_voltage"), value)
+
+
+@pytest.mark.parametrize("key", ["serial_number", "soc", "power_factor"])
+def test_encode_value_rejects_non_numeric(key):
+    with pytest.raises(ValueError, match="numeric"):
+        encode_value(find_input(key), 1)
+
+
+def test_encode_value_rejects_32bit():
+    with pytest.raises(ValueError, match="32-bit"):
+        encode_value(find_input("pv1_energy_total"), 1.0)
 
 
 # --- Signed values -----------------------------------------------------------
