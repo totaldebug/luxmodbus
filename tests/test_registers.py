@@ -357,6 +357,39 @@ def test_extended_hold_settings_default_off():
         assert find_hold(key).enabled_default is False, key
 
 
+@pytest.mark.parametrize(
+    ("key", "observed"),
+    [
+        ("charge_current_limit", 146),  # spec nominal max was 140
+        ("discharge_current_limit", 146),
+        ("feed_in_grid_power_rate", 120),  # spec nominal max was 100
+        ("discharge_cutoff_soc", 5),  # spec nominal min was 10
+    ],
+)
+def test_relaxed_bounds_accept_live_values(key, observed):
+    # Bounds were widened so the inverter's own reported values round-trip.
+    defn = find_hold(key)
+    assert encode_value(defn, observed) == observed
+
+
+def test_discovered_gen_charge_voltage():
+    defn = find_hold("gen_charge_start_voltage")
+    assert defn.address == 194
+    assert decode_value(defn, {194: 400}) == 40.0  # live value
+    assert encode_value(defn, 40.0) == 400
+
+
+def test_discovered_lead_acid_temp_is_signed():
+    defn = find_hold("lead_acid_temp_lower_discharge")
+    assert defn.type is ValueType.S16
+    assert decode_value(defn, {106: 0xFF38}) == -20.0  # live value, signed
+
+
+def test_discovered_smart_load_default_off():
+    for key in ("smart_load_on_voltage", "ac_couple_end_voltage", "gen_charge_end_soc"):
+        assert find_hold(key).enabled_default is False, key
+
+
 # --- Extended model-specific input registers (capture-discovered) ------------
 
 

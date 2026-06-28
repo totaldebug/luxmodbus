@@ -80,6 +80,25 @@ charge currents, and three whole-register selects (`output_priority` 145,
 `line_mode` 146, `grid_type` 205). Everything added here ships
 `enabled_default=False` and is bounded to the spec's range.
 
+### Live hold-bank sweep
+
+A read-only sweep of holds 0–279 on a real inverter validated the map (the
+selects in particular: `grid_type` → "Single 230V", `output_priority` →
+"Battery First", `line_mode` → "APL"). It also turned up two things:
+
+- **Spec ranges are nominal, not hard limits.** The device reported values
+  *outside* the spec's "Range" column: `charge_current_limit` 146 (spec 0–140),
+  `feed_in_grid_power_rate` 120 (spec 0–100), `discharge_cutoff_soc` 5 (spec
+  10–90). Bounds were widened (currents → 0–200, feed-in → 0–150, cutoff SOC →
+  0–90) so `encode_value` accepts the inverter's own values. Treat spec ranges as
+  guidance, not ceilings.
+- **More registers mapped from live values** (scales confirmed by what they
+  returned, all `enabled_default=False`): lead-acid temperature limits 106–109
+  (signed, 0.1 °C — the discharge lower limit read −20.0 °C), generator-charge
+  194–197, smart-load 213–216, AC-couple 220–223.
+- `firmware_code` (7–8) read **zero** on this unit — the ASCII mapping is mapped
+  but unconfirmed against a populated value.
+
 Deliberately **not** mapped (documented so the next person doesn't map them
 cold):
 
@@ -102,6 +121,7 @@ cold):
 - `uFunctionEn2` (179) and `uFunction4En` (232–233) are further bit-packed
   function-enable registers (peak-shaving, smart-load, AC-couple, working-mode
   selection); map as `FlagRegister`s once the per-model bit meanings are pinned.
-- Generator (194–198, 255–259), peak-shaving (206–219), smart-load (213–216) and
-  AC-couple (220–223) settings are well-defined in the spec and can be added the
-  same way when a target platform needs them.
+- Remaining well-defined settings the sweep surfaced but left unmapped:
+  generator current/times (198, 255–259), peak-shaving (206–212, 217–219),
+  freq-derate (115–118, 134–136) and the VoltWatt / Vref Q-P curve (180–197).
+  Add the same way (default-off, spec-bounded) when a platform needs them.
