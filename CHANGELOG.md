@@ -14,3 +14,10 @@
 - `encode_value` — the inverse of `decode_value` for numeric registers: enforces
   the declared `value_min` / `value_max` bounds and the register scale, returning
   the raw word to write.
+- Expanded hold-register coverage from the spec's Table 8: the read-only
+  `firmware_code` (ASCII), battery cell/float/nominal voltages, AC-charge and
+  battery-low voltage/SOC thresholds, charge/forced-discharge voltage limits,
+  charge currents, and the `output_priority`, `line_mode` and `grid_type`
+  selects. All ship `enabled_default=False` and bounded to the spec range. See
+  `docs/discovered-registers.md` for what was deliberately deferred (regulatory
+  grid-protection, the OptimalChg bit schedule, and diagnostic/config blocks).

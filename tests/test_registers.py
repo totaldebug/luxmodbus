@@ -304,6 +304,59 @@ def test_on_grid_working_mode_not_a_switch_flag():
     assert all(flag.key != "on_grid_working_mode" for flag in function_en1.flags)
 
 
+def test_extended_select_round_trips():
+    grid_type = next(s for s in SELECT_REGISTERS if s.key == "grid_type")
+    assert decode_select(set_select(0, grid_type, "Single 230V"), grid_type) == "Single 230V"
+    output_priority = next(s for s in SELECT_REGISTERS if s.key == "output_priority")
+    assert decode_select(set_select(0, output_priority, "PV First"), output_priority) == "PV First"
+
+
+def test_extended_selects_default_off():
+    new = [s for s in SELECT_REGISTERS if s.key != "on_grid_working_mode"]
+    assert new and all(not s.enabled_default for s in new)
+
+
+# --- Extended hold settings (spec Table 8) -----------------------------------
+
+
+def test_float_charge_voltage_bounds_and_scale():
+    fcv = find_hold("float_charge_voltage")
+    assert fcv.address == 144
+    assert fcv.writable is True
+    assert (fcv.value_min, fcv.value_max) == (50.0, 56.0)
+    assert encode_value(fcv, 53.0) == 530  # 53.0 V / 0.1
+    assert decode_value(fcv, {144: 530}) == 53.0
+
+
+@pytest.mark.parametrize("value", [49.9, 56.1])
+def test_float_charge_voltage_rejects_out_of_range(value):
+    with pytest.raises(ValueError, match="float_charge_voltage"):
+        encode_value(find_hold("float_charge_voltage"), value)
+
+
+def test_firmware_code_decodes_ascii():
+    fw = find_hold("firmware_code")
+    assert fw.address == 7
+    assert fw.writable is False
+    assert fw.addresses() == (7, 8)
+    # "AAAB" -> reg 7 = 'A','A'; reg 8 = 'A','B' (low byte first).
+    raw = {7: (ord("A") << 8) | ord("A"), 8: (ord("B") << 8) | ord("A")}
+    assert decode_value(fw, raw) == "AAAB"
+
+
+def test_extended_hold_settings_default_off():
+    extended = {
+        "firmware_code",
+        "float_charge_voltage",
+        "battery_nominal_voltage",
+        "bat_low_voltage",
+        "bat_stop_charge_voltage",
+        "max_gen_charge_battery_current",
+    }
+    for key in extended:
+        assert find_hold(key).enabled_default is False, key
+
+
 # --- Extended model-specific input registers (capture-discovered) ------------
 
 

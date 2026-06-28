@@ -70,12 +70,38 @@ Beyond these, the inverter answers reads across the whole input range but the
 remaining addresses (roughly 225–380, plus assorted gaps) read **0** on this
 model — reserved/unused here, not worth mapping without a unit that reports them.
 
+## Hold register coverage (spec Table 8)
+
+Hold registers 7–261 are defined in the spec's Table 8. The map now covers the
+validated core plus the high-value battery/charge/discharge settings:
+identity (`firmware_code`, regs 7–8 ASCII), cell/float/nominal voltages, AC-charge
+and battery-low voltage/SOC thresholds, charge/forced-discharge voltage limits,
+charge currents, and three whole-register selects (`output_priority` 145,
+`line_mode` 146, `grid_type` 205). Everything added here ships
+`enabled_default=False` and is bounded to the spec's range.
+
+Deliberately **not** mapped (documented so the next person doesn't map them
+cold):
+
+- **Regulatory grid protection (29–63)** — `GridVoltLimit*` / `GridFreqLimit*`
+  trip points and times. Region-locked ("according to regulatory requirements")
+  and risky to expose as user-writable; map per regulation if ever needed.
+- **OptimalChg/DisChg schedule (125–131)** — 48 two-bit time slots packed across
+  registers; needs a dedicated multi-field decoder, not the current helpers.
+- **Power-export CMDs (60–63, 138–143)** — duplicate the percentage settings
+  already mapped at 64–66/74/82 at finer resolution; left out to avoid two
+  entities for one knob.
+- **LCD / meter / WattNode / bootloader / parallel-system config (179, 224–252)**
+  — installer/diagnostic registers, mostly bit-packed and model-specific.
+
 ## Follow-up candidates
 
-- **Firmware code** — hold register 7 (`FWCode0..2`, ASCII) per the spec's hold
-  table. Now that `ValueType.ASCII` exists, this is straightforward to map once a
-  capture includes hold-register reads (the poller observed only read the input
-  bank).
 - The bit-packed status registers above (78–80, 95, 113) would be a natural fit
   for the `FlagRegister` / `SelectRegister` mechanisms once the bit layouts are
   confirmed.
+- `uFunctionEn2` (179) and `uFunction4En` (232–233) are further bit-packed
+  function-enable registers (peak-shaving, smart-load, AC-couple, working-mode
+  selection); map as `FlagRegister`s once the per-model bit meanings are pinned.
+- Generator (194–198, 255–259), peak-shaving (206–219), smart-load (213–216) and
+  AC-couple (220–223) settings are well-defined in the spec and can be added the
+  same way when a target platform needs them.
