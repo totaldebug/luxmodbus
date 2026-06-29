@@ -18,6 +18,7 @@ from luxmodbus.registers import (
     decode_holds,
     decode_inputs,
     decode_select,
+    decode_status,
     decode_time,
     decode_value,
     encode_time,
@@ -388,6 +389,35 @@ def test_discovered_lead_acid_temp_is_signed():
 def test_discovered_smart_load_default_off():
     for key in ("smart_load_on_voltage", "ac_couple_end_voltage", "gen_charge_end_soc"):
         assert find_hold(key).enabled_default is False, key
+
+
+# --- Status decoding + enabled-default parity --------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "label"),
+    [(0x00, "Standby"), (0x04, "PV on Grid"), (0x20, "AC Charging"), (0xC0, "PV + Battery Off-grid")],
+)
+def test_decode_status(value, label):
+    assert decode_status(value) == label
+
+
+def test_decode_status_unknown_is_none():
+    assert decode_status(0x99) is None
+
+
+def test_parity_sensors_enabled_by_default():
+    # Sensors the original integration showed; re-enabled for parity.
+    for key in (
+        "inverter_current",
+        "pv3_voltage",
+        "pv3_power",
+        "pv3_energy_today",
+        "pv3_energy_total",
+        "eps_energy_today",
+        "eps_energy_total",
+    ):
+        assert find_input(key).enabled_default is True, key
 
 
 # --- Grid-support / peak-shaving registers (spec Table 8) --------------------

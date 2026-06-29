@@ -33,6 +33,7 @@ __all__ = [
     "HOLD_REGISTERS",
     "INPUT_REGISTERS",
     "SELECT_REGISTERS",
+    "STATUS_CODES",
     "TIME_REGISTERS",
     "ByteSelect",
     "FlagDef",
@@ -47,6 +48,7 @@ __all__ = [
     "decode_holds",
     "decode_inputs",
     "decode_select",
+    "decode_status",
     "decode_time",
     "decode_value",
     "encode_time",
@@ -358,6 +360,32 @@ def set_select(register_value: int, select: SelectRegister, option: str) -> int:
     return (register_value & ~select.mask & 0xFFFF) | shifted
 
 
+# Status register (input 0) operating-mode codes, from the spec's Table 9
+# "Operational mode definitions".
+STATUS_CODES: dict[int, str] = {
+    0x00: "Standby",
+    0x01: "Fault",
+    0x02: "Programming",
+    0x04: "PV on Grid",
+    0x08: "PV Charging",
+    0x0C: "PV Charging on Grid",
+    0x10: "Battery on Grid",
+    0x14: "PV + Battery on Grid",
+    0x20: "AC Charging",
+    0x28: "PV + AC Charging",
+    0x40: "Battery Off-grid",
+    0x60: "Off-grid + Battery Charging",
+    0x80: "PV Off-grid",
+    0x88: "PV Charging + Off-grid",
+    0xC0: "PV + Battery Off-grid",
+}
+
+
+def decode_status(value: int) -> str | None:
+    """Return the operating-mode label for a status register value (Table 9), or None if unknown."""
+    return STATUS_CODES.get(value)
+
+
 # --- Input registers (telemetry → sensors) -----------------------------------
 #
 # Single-phase hybrid is the validated target. Three-phase (S/T phase), US
@@ -401,7 +429,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.VOLTAGE,
         scale=0.1,
         unit=V,
-        enabled_default=False,
     ),
     RegisterDef(
         "battery_voltage",
@@ -455,7 +482,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         RegisterBank.INPUT,
         Measurement.POWER,
         unit=W,
-        enabled_default=False,
     ),
     RegisterDef(
         "battery_charge_power",
@@ -535,7 +561,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.CURRENT,
         scale=0.01,
         unit=A,
-        enabled_default=False,
     ),
     RegisterDef(
         "power_factor",
@@ -628,7 +653,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.ENERGY,
         scale=0.1,
         unit=KWH,
-        enabled_default=False,
     ),
     RegisterDef(
         "inverter_energy_today",
@@ -674,7 +698,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.ENERGY,
         scale=0.1,
         unit=KWH,
-        enabled_default=False,
     ),
     RegisterDef(
         "energy_to_grid_today",
@@ -743,7 +766,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         type=ValueType.U32,
         scale=0.1,
         unit=KWH,
-        enabled_default=False,
     ),
     RegisterDef(
         "inverter_energy_total",
@@ -794,7 +816,6 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         type=ValueType.U32,
         scale=0.1,
         unit=KWH,
-        enabled_default=False,
     ),
     RegisterDef(
         "energy_to_grid_total",
