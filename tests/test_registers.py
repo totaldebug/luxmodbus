@@ -14,9 +14,12 @@ from luxmodbus.registers import (
     Measurement,
     RegisterBank,
     ValueType,
+    decode_firmware_version,
     decode_flags,
     decode_holds,
     decode_inputs,
+    decode_model,
+    decode_model_code,
     decode_select,
     decode_status,
     decode_time,
@@ -396,7 +399,12 @@ def test_discovered_smart_load_default_off():
 
 @pytest.mark.parametrize(
     ("value", "label"),
-    [(0x00, "Standby"), (0x04, "PV on Grid"), (0x20, "AC Charging"), (0xC0, "PV + Battery Off-grid")],
+    [
+        (0, "Standby"),
+        (4, "Solar to load, surplus to grid"),  # the live unit reported this
+        (32, "AC charging battery"),
+        (192, "Off-grid: solar and battery to backup"),
+    ],
 )
 def test_decode_status(value, label):
     assert decode_status(value) == label
@@ -477,7 +485,7 @@ def test_extended_input_registers_decode():
 
 def test_extended_input_registers_default_off():
     # All capture-discovered extras are model-specific -> disabled by default.
-    for key in ("inverter_power_s", "eps_voltage_l1n", "pv4_voltage", "smart_load_power"):
+    for key in ("inverter_power_s", "eps_l1_power", "pv4_voltage", "smart_load_power"):
         assert find_input(key).enabled_default is False
 
 
@@ -519,3 +527,74 @@ def test_serial_number_strips_padding():
 def test_serial_number_in_decoded_inputs():
     raw = {115: 0x3033, 116: 0x3233, 117: 0x3533, 118: 0x3130, 119: 0x3730}
     assert decode_inputs(raw)["serial_number"] == "3032350107"
+
+
+# --- BMS current-limit scale (model-dependent; deci-amp for the EAAB family) --
+
+
+def test_bms_limit_uses_deci_amp_scale():
+    # Live EAAB unit: reg 82 raw 1000 -> 100.0 A (was wrongly 10.0 at 0.01).
+    assert decode_value(find_input("bms_limit_discharge"), {82: 1000}) == 100.0
+    assert decode_value(find_input("bms_limit_charge"), {81: 1465}) == 146.5
+
+
+# --- EPS L1/L2 voltage sourced from registers 127/128 ------------------------
+
+
+def test_eps_l1_l2_voltage_from_127_128():
+    # The user-facing EPS L1/L2 voltages live at 127/128 and ship enabled.
+    l1, l2 = find_input("eps_voltage_l1n"), find_input("eps_voltage_l2n")
+    assert (l1.address, l1.name, l1.enabled_default) == (127, "EPS L1 Voltage", True)
+    assert (l2.address, l2.name, l2.enabled_default) == (128, "EPS L2 Voltage", True)
+    # Live capture values.
+    assert decode_value(l1, {127: 2668}) == 266.8
+    assert decode_value(l2, {128: 1926}) == 192.6
+
+
+def test_battery_temperature_default_off():
+    # Inverter NTC reads an unreliable value vs the BMS cell temps; default-off.
+    bt = find_input("battery_temperature")
+    assert bt.address == 67
+    assert bt.enabled_default is False
+
+
+def test_eps_phase_registers_are_rst_and_default_off():
+    # Registers 20-22 are the R/S/T phases; noise on single-phase, so default-off.
+    r, s, t = (find_input(k) for k in ("eps_voltage_l1", "eps_voltage_l2", "eps_voltage_t"))
+    assert (r.address, r.name) == (20, "EPS R Voltage")
+    assert (s.address, s.name) == (21, "EPS S Voltage")
+    assert (t.address, t.name) == (22, "EPS T Voltage")
+    assert not any(d.enabled_default for d in (r, s, t))
+
+
+# --- Model / firmware decoding (hold registers 7-10) -------------------------
+
+# Live EAAB unit: 7=0x4145 ("EA"), 8=0x4241 ("AB"), 9=0x1003, 10=0x0110.
+_FW_HOLDS = {7: 0x4145, 8: 0x4241, 9: 0x1003, 10: 0x0110}
+
+
+def test_decode_model_code():
+    assert decode_model_code(_FW_HOLDS) == "EAAB"
+
+
+def test_decode_model_maps_known_code():
+    assert decode_model(_FW_HOLDS) == "LXP-LB-EU 7K"
+
+
+def test_decode_model_falls_back_to_raw_code():
+    # An unrecognised but valid code is returned as-is, never lost.
+    assert decode_model({7: (ord("Z") << 8) | ord("Z"), 8: (ord("Z") << 8) | ord("Z")}) == "ZZZZ"
+
+
+def test_decode_firmware_version():
+    assert decode_firmware_version(_FW_HOLDS) == "EAAB-1010"
+
+
+@pytest.mark.parametrize("decoder", [decode_model_code, decode_model, decode_firmware_version])
+def test_decoders_none_when_unpopulated(decoder):
+    assert decoder({}) is None
+    assert decoder({7: 0, 8: 0, 9: 0, 10: 0}) is None  # zero bytes are not a code
+
+
+def test_decode_firmware_version_needs_version_words():
+    assert decode_firmware_version({7: 0x4145, 8: 0x4241}) is None  # 9/10 absent

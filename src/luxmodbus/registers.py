@@ -32,6 +32,7 @@ __all__ = [
     "FLAG_REGISTERS",
     "HOLD_REGISTERS",
     "INPUT_REGISTERS",
+    "MODEL_NAMES",
     "SELECT_REGISTERS",
     "STATUS_CODES",
     "TIME_REGISTERS",
@@ -44,9 +45,12 @@ __all__ = [
     "SelectRegister",
     "TimeRegister",
     "ValueType",
+    "decode_firmware_version",
     "decode_flags",
     "decode_holds",
     "decode_inputs",
+    "decode_model",
+    "decode_model_code",
     "decode_select",
     "decode_status",
     "decode_time",
@@ -360,30 +364,104 @@ def set_select(register_value: int, select: SelectRegister, option: str) -> int:
     return (register_value & ~select.mask & 0xFFFF) | shifted
 
 
-# Status register (input 0) operating-mode codes, from the spec's Table 9
-# "Operational mode definitions".
+# Operating-state codes reported in input register 0. The codes and their
+# meanings are the states observed on live LuxPower hardware (a superset of the
+# spec's Table 9); the human-readable descriptions are written fresh here. A
+# code outside this set decodes to None ("unknown").
 STATUS_CODES: dict[int, str] = {
-    0x00: "Standby",
-    0x01: "Fault",
-    0x02: "Programming",
-    0x04: "PV on Grid",
-    0x08: "PV Charging",
-    0x0C: "PV Charging on Grid",
-    0x10: "Battery on Grid",
-    0x14: "PV + Battery on Grid",
-    0x20: "AC Charging",
-    0x28: "PV + AC Charging",
-    0x40: "Battery Off-grid",
-    0x60: "Off-grid + Battery Charging",
-    0x80: "PV Off-grid",
-    0x88: "PV Charging + Off-grid",
-    0xC0: "PV + Battery Off-grid",
+    0: "Standby",
+    1: "Fault",
+    2: "Inverting",
+    4: "Solar to load, surplus to grid",
+    5: "Float charge",
+    7: "Charger off",
+    8: "Supporting load",
+    9: "Exporting to grid",
+    10: "Pass-through",
+    11: "Offsetting",
+    12: "Solar charging battery",
+    16: "Battery to load, surplus to grid",
+    17: "AC bypass (battery discharged)",
+    20: "Solar and battery to load, surplus to grid",
+    32: "AC charging battery",
+    40: "Solar and grid charging battery",
+    64: "Off-grid: battery to backup",
+    136: "Off-grid: solar to backup, surplus charging battery",
+    192: "Off-grid: solar and battery to backup",
 }
 
 
 def decode_status(value: int) -> str | None:
-    """Return the operating-mode label for a status register value (Table 9), or None if unknown."""
+    """Return the operating-state label for a status register value, or None if unknown."""
     return STATUS_CODES.get(value)
+
+
+# Inverter model identifiers. The four-character code lives in hold registers
+# 7-8 (two ASCII chars each, low byte first); this table maps the codes to their
+# marketing names, compiled as product facts (not copied from any implementation)
+# so the integration can show a friendly model. Unknown codes fall through to
+# the raw code, so the value is never lost.
+MODEL_NAMES: dict[str, str] = {
+    "AAAA": "LXP 3-6K Hybrid",
+    "AAAB": "LXP 3-6K Hybrid (Parallel)",
+    "BAAA": "LXP-3600 ACS",
+    "BAAB": "LXP-3600 ACS (Parallel)",
+    "ACAB": "GEN-LB-EU 3-6K",
+    "CBAA": "SNA 3000-6000",
+    "CCAA": "SNA-US 6000",
+    "CEAA": "SNA12K-US",
+    "CFAA": "SNA 12K",
+    "EAAB": "LXP-LB-EU 7K",
+    "FAAB": "LXP-LB 8-12K",
+    "HAAA": "GEB-LB-EU 7-10K",
+}
+
+
+def _ascii_pair(word: int) -> str:
+    """Decode the two ASCII characters packed into one register, low byte first."""
+    return chr(word & 0xFF) + chr((word >> 8) & 0xFF)
+
+
+def decode_model_code(holds: Mapping[int, int]) -> str | None:
+    """Return the four-character model/firmware code from hold registers 7-8, or None.
+
+    Each register packs two ASCII characters low byte first, so e.g. registers
+    ``0x4145`` and ``0x4241`` decode to ``"EAAB"``. Returns None when either
+    register is absent or the result is not alphanumeric ASCII (an unpopulated
+    code reads as zero bytes).
+    """
+    reg7, reg8 = holds.get(7), holds.get(8)
+    if reg7 is None or reg8 is None:
+        return None
+    code = _ascii_pair(reg7) + _ascii_pair(reg8)
+    return code if code.isascii() and code.isalnum() else None
+
+
+def decode_model(holds: Mapping[int, int]) -> str | None:
+    """Return the inverter's marketing model name, falling back to the raw code.
+
+    Looks the four-character code (see :func:`decode_model_code`) up in
+    :data:`MODEL_NAMES`; an unrecognised code is returned as-is. Returns None
+    only when the code cannot be read.
+    """
+    code = decode_model_code(holds)
+    if code is None:
+        return None
+    return MODEL_NAMES.get(code, code)
+
+
+def decode_firmware_version(holds: Mapping[int, int]) -> str | None:
+    """Return the firmware version string (e.g. ``"EAAB-1010"``) from hold registers 7-10.
+
+    Registers 7-8 supply the four-character code; the version suffix is the high
+    byte of register 9 and the low byte of register 10, each rendered as two hex
+    digits. Returns None if the code or either version register is absent.
+    """
+    code = decode_model_code(holds)
+    reg9, reg10 = holds.get(9), holds.get(10)
+    if code is None or reg9 is None or reg10 is None:
+        return None
+    return f"{code}-{(reg9 >> 8) & 0xFF:02x}{reg10 & 0xFF:02x}"
 
 
 # --- Input registers (telemetry → sensors) -----------------------------------
@@ -570,23 +648,31 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.POWER_FACTOR,
         transform="power_factor",
     ),
+    # Registers 20-22 are the EPS R/S/T phase voltages. On a single-phase unit
+    # only R carries a real value; S/T read noise (confirmed live: reg 21 read
+    # 4423 V, reg 22 read 1547 V). The user-facing "EPS L1/L2 Voltage" come from
+    # registers 127/128 instead (see eps_voltage_l1n / eps_voltage_l2n below), so
+    # these per-phase registers ship default-off. Keys keep their historical
+    # ``_l1``/``_l2`` suffixes to preserve existing entity unique IDs.
     RegisterDef(
         "eps_voltage_l1",
         20,
-        "EPS L1 Voltage",
+        "EPS R Voltage",
         RegisterBank.INPUT,
         Measurement.VOLTAGE,
         scale=0.1,
         unit=V,
+        enabled_default=False,
     ),
     RegisterDef(
         "eps_voltage_l2",
         21,
-        "EPS L2 Voltage",
+        "EPS S Voltage",
         RegisterBank.INPUT,
         Measurement.VOLTAGE,
         scale=0.1,
         unit=V,
+        enabled_default=False,
     ),
     RegisterDef(
         "eps_voltage_t",
@@ -877,6 +963,9 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         Measurement.TEMPERATURE,
         unit=C,
     ),
+    # The inverter's own battery NTC input. It is uncalibrated/often unconnected
+    # (a live unit read 6 °C while the BMS cell temps read 22-23 °C), so it ships
+    # default-off; the trustworthy battery temperature is max/min cell temperature.
     RegisterDef(
         "battery_temperature",
         67,
@@ -884,6 +973,7 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         RegisterBank.INPUT,
         Measurement.TEMPERATURE,
         unit=C,
+        enabled_default=False,
     ),
     RegisterDef(
         "runtime",
@@ -895,13 +985,18 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         unit="s",
         enabled_default=False,
     ),
+    # The BMS current-limit raw unit is model-dependent: the FAAB/EAAB/ACAB/
+    # CFAA/CCAA/CEAA families report deci-amps (raw * 0.1 A); other models report
+    # centi-amps (raw * 0.01 A). The validated target hardware is EAAB
+    # (LXP-LB-EU 7K), confirmed on a live unit: reg 82 raw 1000 -> 100.0 A. A
+    # static map can carry only one factor, so it uses the deci-amp scale.
     RegisterDef(
         "bms_limit_charge",
         81,
         "BMS Limit Charge",
         RegisterBank.INPUT,
         Measurement.CURRENT,
-        scale=0.01,
+        scale=0.1,
         unit=A,
     ),
     RegisterDef(
@@ -910,7 +1005,7 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         "BMS Limit Discharge",
         RegisterBank.INPUT,
         Measurement.CURRENT,
-        scale=0.01,
+        scale=0.1,
         unit=A,
     ),
     RegisterDef(
@@ -1156,25 +1251,27 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         unit=V,
         enabled_default=False,
     ),
+    # The inverter's primary EPS output voltages. Confirmed against a live unit
+    # (reg 127 read 266.8 V, reg 128 read 192.6 V) and the per-phase R/S/T
+    # registers at 20-22, which read noise on single-phase hardware. These carry
+    # the user-facing "EPS L1/L2 Voltage" and ship enabled by default.
     RegisterDef(
         "eps_voltage_l1n",
         127,
-        "EPS L1N Voltage",
+        "EPS L1 Voltage",
         RegisterBank.INPUT,
         Measurement.VOLTAGE,
         scale=0.1,
         unit=V,
-        enabled_default=False,
     ),
     RegisterDef(
         "eps_voltage_l2n",
         128,
-        "EPS L2N Voltage",
+        "EPS L2 Voltage",
         RegisterBank.INPUT,
         Measurement.VOLTAGE,
         scale=0.1,
         unit=V,
-        enabled_default=False,
     ),
     RegisterDef(
         "inverter_power_s",
