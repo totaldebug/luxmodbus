@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/totaldebug/luxmodbus/compare/0.1.0...0.2.0) (2026-06-29)
+
+
+### Features
+
+* Add status-code decoder and enable parity sensors by default ([51610af](https://github.com/totaldebug/luxmodbus/commit/51610af117c97d6223ce713b6b3623b3f9565d15))
+* Map grid-support and peak-shaving hold registers (spec Table 8) ([f5801ef](https://github.com/totaldebug/luxmodbus/commit/f5801ef77936d5060538547e8e366c27a67f320e))
+
 ## [0.1.0](https://github.com/totaldebug/luxmodbus/compare/0.0.1...0.1.0) (2026-06-28)
 
 
