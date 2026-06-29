@@ -121,7 +121,12 @@ cold):
 - `uFunctionEn2` (179) and `uFunction4En` (232–233) are further bit-packed
   function-enable registers (peak-shaving, smart-load, AC-couple, working-mode
   selection); map as `FlagRegister`s once the per-model bit meanings are pinned.
-- Remaining well-defined settings the sweep surfaced but left unmapped:
-  generator current/times (198, 255–259), peak-shaving (206–212, 217–219),
-  freq-derate (115–118, 134–136) and the VoltWatt / Vref Q-P curve (180–197).
-  Add the same way (default-off, spec-bounded) when a platform needs them.
+
+Now mapped (default-off, spec-bounded; frequency points use wide Hz bounds):
+frequency derate (97, 115, 124, 134–136, 193), the Volt-Watt / Vref Q(V) curve
+(181–192), peak-shaving (206–208, 218–219, 232) with its schedule times
+(209–212), and the generator schedule times (256–259).
+
+Still unmapped and available the same way when needed: the `PtoUser` zero-export
+thresholds (116–118), AFCI arc threshold (180), generator current (198), and the
+`StartPVpower` threshold (217).

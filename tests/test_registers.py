@@ -390,6 +390,47 @@ def test_discovered_smart_load_default_off():
         assert find_hold(key).enabled_default is False, key
 
 
+# --- Grid-support / peak-shaving registers (spec Table 8) --------------------
+
+
+def test_freq_derate_scale_and_bounds():
+    defn = find_hold("over_freq_derate_start")
+    assert defn.address == 115
+    assert decode_value(defn, {115: 5025}) == 50.25  # live value
+    assert encode_value(defn, 50.25) == 5025
+
+
+def test_volt_watt_curve_percentages_unbounded():
+    # The Q(V)/P(Q) curve points have no documented range, so no bounds.
+    for key in ("q3_qv", "q4_qv", "p1_qp", "p4_qp"):
+        defn = find_hold(key)
+        assert defn.value_min is None and defn.value_max is None
+        assert defn.writable is True
+
+
+def test_peak_shaving_power_in_kw():
+    defn = find_hold("grid_peak_shaving_power")
+    assert defn.address == 206
+    assert defn.unit == "kW"
+    assert decode_value(defn, {206: 100}) == 10.0  # 0.1 kW scale
+
+
+@pytest.mark.parametrize(
+    ("key", "address"),
+    [
+        ("peak_shaving_start", 209),
+        ("peak_shaving_end_2", 212),
+        ("gen_start", 256),
+        ("gen_end_2", 259),
+    ],
+)
+def test_new_time_registers(key, address):
+    reg = next(t for t in TIME_REGISTERS if t.key == key)
+    assert reg.address == address
+    assert reg.enabled_default is False
+    assert reg.address in mapped_hold_addresses()  # polled & diffed for discovery
+
+
 # --- Extended model-specific input registers (capture-discovered) ------------
 
 
