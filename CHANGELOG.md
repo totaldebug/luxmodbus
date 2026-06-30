@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/totaldebug/luxmodbus/compare/0.2.0...0.3.0) (2026-06-29)
+
+
+### Features
+
+* Source EPS L1/L2 from 127/128, fix BMS scale, add model/firmware decode ([f87ee35](https://github.com/totaldebug/luxmodbus/commit/f87ee354cf21956172246cde89570eb9509a7d38))
+
 ## [0.2.0](https://github.com/totaldebug/luxmodbus/compare/0.1.0...0.2.0) (2026-06-29)
 
 
