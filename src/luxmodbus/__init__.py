@@ -63,7 +63,7 @@ from luxmodbus.transport import (
     TransportNotConnectedError,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "DEFAULT_HISTORY_LIMIT",
