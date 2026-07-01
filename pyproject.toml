@@ -1,6 +1,6 @@
 [project]
 name = "luxmodbus"
-version = "0.3.0"
+version = "0.3.1"
 description = "Framing, register map, and discovery for the LuxPower inverter Modbus protocol (HA-free)."
 authors = [
     { name = "Steven Marks", email = "marksie1988@users.noreply.github.com" }
