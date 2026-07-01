@@ -1037,7 +1037,8 @@ INPUT_REGISTERS: tuple[RegisterDef, ...] = (
         RegisterBank.INPUT,
         Measurement.CURRENT,
         type=ValueType.S16,
-        scale=0.01,
+        # Deci-amp: raw -265 -> -26.5 A (reference divides reg 98 by 10, not 100).
+        scale=0.1,
         unit=A,
     ),
     RegisterDef(

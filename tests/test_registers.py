@@ -78,7 +78,7 @@ def test_encode_value_round_trips_decode():
 
 
 def test_encode_value_signed_round_trips():
-    # battery_current is s16 @ 0.01 A; -1.0 A -> -100 -> two's-complement word.
+    # battery_current is s16 @ 0.1 A; -1.0 A -> -10 -> two's-complement word.
     current = find_input("battery_current")
     word = encode_value(current, -1.0)
     assert decode_value(current, {current.address: word}) == -1.0
@@ -106,8 +106,8 @@ def test_encode_value_rejects_32bit():
 
 def test_signed_battery_current_negative():
     cur = find_input("battery_current")
-    # 0xFFFF as S16 == -1 raw -> -0.01 A
-    assert decode_value(cur, {98: 0xFFFF}) == -0.01
+    # 0xFFFF as S16 == -1 raw -> -0.1 A
+    assert decode_value(cur, {98: 0xFFFF}) == pytest.approx(-0.1)
 
 
 def test_signed_cell_temperature_negative():
